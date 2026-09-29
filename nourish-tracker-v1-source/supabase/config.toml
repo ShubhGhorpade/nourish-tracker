@@ -1,0 +1,4 @@
+project_id = "nourish-personal"
+
+[functions.nutrition-api]
+verify_jwt = true
