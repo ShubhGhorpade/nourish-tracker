@@ -1,0 +1,21 @@
+Nourish V1.1 iPhone hotfix
+
+Fixes:
+- Secure AI/USDA features automatically establish a private anonymous Supabase session when the user has not created an email account.
+- iPhone/Safari barcode scanning no longer depends only on the experimental BarcodeDetector API. It adds ZXing Browser camera scanning and a deterministic "Take barcode photo" fallback.
+- Modal compatibility errors are contained instead of blanking the entire app.
+- Service worker changes from stale-prone cache-first behavior to network-first and bumps the cache version.
+- Mobile modal sizing/scrolling is hardened for iOS Safari.
+- Edge Function accepts the current Supabase publishable-key environment format while retaining legacy fallback.
+
+Required Supabase setting:
+Enable Authentication > Providers > Anonymous sign-ins before testing AI/USDA without an email account.
+
+After extracting over the repository:
+  npm install --no-audit --no-fund
+  npm test
+  npx supabase functions deploy nutrition-api
+  git add -A
+  git commit -m "Fix iPhone AI and barcode flows"
+
+Then push the commit using GitHub Desktop. The existing GitHub Pages workflow will deploy automatically.

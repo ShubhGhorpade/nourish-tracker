@@ -30,6 +30,7 @@ declare namespace JSX {
 }
 interface Window {
   BarcodeDetector?: any;
+  ZXingBrowser?: any;
   webkitSpeechRecognition?: any;
   SpeechRecognition?: any;
   NOURISH_CONFIG?: {

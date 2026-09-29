@@ -6,6 +6,7 @@ export interface AuthSession {
   expiresAt?: number;
   email?: string;
   userId?: string;
+  isAnonymous?: boolean;
 }
 
 const SESSION_KEY = 'nourish-supabase-session-v1';
@@ -33,7 +34,13 @@ async function authRequest(path: string, body: unknown): Promise<any> {
     body: JSON.stringify(body)
   });
   const json = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(json.msg || json.error_description || json.message || `Authentication failed (${response.status}).`);
+  if (!response.ok) {
+    const code = String(json.error_code ?? json.code ?? '');
+    if (code === 'anonymous_provider_disabled') {
+      throw new Error('Private device access is not enabled yet. In Supabase, turn on Authentication → Providers → Anonymous sign-ins, then try again.');
+    }
+    throw new Error(json.msg || json.error_description || json.message || `Authentication failed (${response.status}).`);
+  }
   return json;
 }
 
@@ -42,12 +49,13 @@ function sessionFromResponse(result: any, fallback?: AuthSession): AuthSession {
     accessToken: result.access_token,
     refreshToken: result.refresh_token ?? fallback?.refreshToken,
     expiresAt: result.expires_at ?? (result.expires_in ? Math.floor(Date.now()/1000)+Number(result.expires_in) : fallback?.expiresAt),
-    email: result.user?.email ?? fallback?.email,
-    userId: result.user?.id ?? fallback?.userId
+    email: result.user?.email || fallback?.email,
+    userId: result.user?.id ?? fallback?.userId,
+    isAnonymous: Boolean(result.user?.is_anonymous ?? fallback?.isAnonymous)
   };
 }
 
-/** Returns a usable session, refreshing it shortly before expiry when possible. */
+/** Returns a usable existing session, refreshing it shortly before expiry when possible. */
 export async function ensureSession(): Promise<AuthSession | null> {
   const current = getSession();
   if (!current) return null;
@@ -62,6 +70,26 @@ export async function ensureSession(): Promise<AuthSession | null> {
     clearSession();
     throw error;
   }
+}
+
+/**
+ * Creates a private anonymous Supabase session. This lets the personal app call the protected
+ * Edge Function without making the user create an account just to use USDA/Gemini.
+ */
+export async function signInAnonymously(): Promise<AuthSession> {
+  const result = await authRequest('signup', {
+    data: { app: 'nourish', purpose: 'private-device-session' },
+    gotrue_meta_security: {}
+  });
+  if (!result.access_token) throw new Error('Private device sign-in did not return a session.');
+  return saveSession(sessionFromResponse(result));
+}
+
+/** Returns an authenticated session for protected backend calls, creating a private device session when needed. */
+export async function ensureBackendSession(): Promise<AuthSession> {
+  const existing = await ensureSession();
+  if (existing?.accessToken) return existing;
+  return signInAnonymously();
 }
 
 export async function signIn(email: string, password: string): Promise<AuthSession> {

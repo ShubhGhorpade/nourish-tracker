@@ -7,7 +7,7 @@ async function walk(dir){const out=[];for(const item of await readdir(dir,{withF
 
 test('production build contains PWA shell and uses hash navigation suitable for GitHub Pages',async()=>{
   const html=await readFile('dist/index.html','utf8');
-  assert.match(html,/manifest\.webmanifest/);assert.match(html,/service-worker\.js|src\/main\.js/);
+  assert.match(html,/manifest\.webmanifest/);assert.match(html,/service-worker\.js|src\/main\.js/);assert.match(html,/zxing-browser\.min\.js/);
   const manifest=JSON.parse(await readFile('dist/manifest.webmanifest','utf8'));
   assert.equal(manifest.display,'standalone');assert.match(manifest.start_url,/#today/);
 });

@@ -6,7 +6,7 @@ import { searchUsda } from '../services/usda.js';
 import { analyzeMealPhoto, extractNutritionLabel, parseMealText, type LabelExtraction } from '../services/ai.js';
 import { prepareImage } from '../services/images.js';
 import { backendConfigured } from '../services/config.js';
-import { barcodeScannerSupported, startBarcodeScanner, type BarcodeScannerHandle } from '../services/barcode.js';
+import { barcodeImageSupported, barcodeScannerEngine, barcodeScannerSupported, decodeBarcodeImage, startBarcodeScanner, type BarcodeScannerHandle } from '../services/barcode.js';
 import { listenOnce, speechRecognitionSupported } from '../services/speech.js';
 import { ConfidenceChip, FoodAvatar, SourceChip } from './common.js';
 import type { FoodEditorInitial } from './editors.js';
@@ -129,13 +129,56 @@ class PhotoPane extends React.Component<{onItems:(items:any[],question?:string)=
 
 class BarcodePane extends React.Component<{data:AppData;mealType:MealType;onFood:(f:Food)=>void;onManual:(initial?:FoodEditorInitial)=>void;onToast:(m:string,t?:any)=>void},any>{
   videoRef=React.createRef<HTMLVideoElement>(); scanner?:BarcodeScannerHandle;
-  constructor(props:any){super(props);this.state={code:'',status:'',error:'',scanning:false,unknown:false,labelLoading:false};}
+  constructor(props:any){super(props);this.state={code:'',status:'',error:'',scanning:false,unknown:false,labelLoading:false,imageLoading:false};}
   componentWillUnmount(){this.scanner?.stop();}
-  async scan(){try{this.setState({scanning:true,error:'',status:'Point the camera at the UPC/EAN barcode.'});this.scanner=await startBarcodeScanner(this.videoRef.current!,code=>{this.setState({code,scanning:false});this.lookup(code);},m=>this.setState({error:m}));}catch(e){this.setState({scanning:false,error:e instanceof Error?e.message:'Camera scanning failed.'});}}
+  async scan(){
+    try{
+      this.setState({scanning:true,error:'',status:'Opening the rear camera…'});
+      this.scanner=await startBarcodeScanner(this.videoRef.current!,code=>{
+        this.setState({code,scanning:false,status:'Barcode detected.'});
+        this.lookup(code);
+      },m=>this.setState({error:m}));
+      this.setState({status:`Point the camera at the UPC/EAN barcode · ${barcodeScannerEngine()==='zxing'?'compatibility scanner':'on-device scanner'}`});
+    }catch(e){
+      this.setState({scanning:false,status:'',error:e instanceof Error?e.message:'Camera scanning failed.'});
+    }
+  }
   stop(){this.scanner?.stop();this.scanner=undefined;this.setState({scanning:false,status:''});}
+  async scanBarcodePhoto(file?:File){
+    if(!file)return;
+    try{
+      this.stop();
+      this.setState({imageLoading:true,error:'',status:'Reading barcode photo…'});
+      const code=await decodeBarcodeImage(file);
+      this.setState({code,imageLoading:false,status:'Barcode detected from photo.'});
+      await this.lookup(code);
+    }catch(e){
+      this.setState({imageLoading:false,status:'',error:e instanceof Error?e.message:'Could not read that barcode photo.'});
+    }
+  }
   async lookup(input?:string){const code=(input??this.state.code).replace(/\D/g,'');if(code.length<8){this.setState({error:'Enter a valid UPC/EAN barcode.'});return;}this.stop();this.setState({status:'Checking your personal cache…',error:'',unknown:false});try{const local=store.findBarcode(code);if(local){this.props.onFood(local);this.setState({status:'Found in your personal cache.'});this.props.onToast('Known barcode matched locally—no AI call.','success');return;}this.setState({status:'Checking Open Food Facts…'});const food=await lookupBarcodeOpenFoodFacts(code);if(food){this.props.onFood(food);this.setState({status:'Product found. Review the package label if precision matters.'});return;}this.setState({status:'',unknown:true});}catch(e){this.setState({status:'',error:e instanceof Error?e.message:'Barcode lookup failed.'});}}
   async scanLabel(file?:File){if(!file)return;try{this.setState({labelLoading:true,error:''});const data=await prepareImage(file);const label=await extractNutritionLabel(data);const values:any={energyKcal:label.calories??null,proteinG:label.proteinG??null,carbsG:label.carbsG??null,fatG:label.fatG??null,fiberG:label.fiberG??null,saturatedFatG:label.saturatedFatG??null,sodiumMg:label.sodiumMg??null,sugarG:label.sugarG??null,addedSugarG:label.addedSugarG??null};this.props.onManual({name:label.productName,brand:label.brand,barcode:this.state.code,servingLabel:label.servingSizeText??'1 serving',servingGrams:label.servingGrams??100,valuesPerServing:values});}catch(e){this.setState({error:e instanceof Error?e.message:'Could not extract the label.'});}finally{this.setState({labelLoading:false});}}
-  render(){const supported=barcodeScannerSupported();return <div className="barcode-pane"><div className={`scanner-shell ${this.state.scanning?'active':''}`}><video ref={this.videoRef} playsInline muted/><div className="scanner-frame"><i/><i/><i/><i/></div>{!this.state.scanning?<div className="scanner-placeholder"><span>▦</span><strong>{supported?'Camera barcode scanner':'Camera scanning unavailable in this browser'}</strong><small>{supported?'UPC-A, UPC-E, EAN-8 and EAN-13 are decoded on-device.':'Manual entry and nutrition-label fallback remain available.'}</small></div>:null}</div><div className="barcode-actions">{supported?<button className="button button-secondary" onClick={()=>this.state.scanning?this.stop():this.scan()}>{this.state.scanning?'Stop camera':'Start camera'}</button>:null}<div className="barcode-manual"><input inputMode="numeric" autoComplete="off" placeholder="Enter barcode" value={this.state.code} onChange={(e:any)=>this.setState({code:e.target.value.replace(/\D/g,'')})} onKeyDown={(e:any)=>{if(e.key==='Enter')this.lookup();}}/><button className="button button-primary" onClick={()=>this.lookup()}>Look up</button></div></div>{this.state.status?<div className="loading-line">{this.state.status}</div>:null}{this.state.error?<div className="inline-error">{this.state.error}</div>:null}{this.state.unknown?<div className="unknown-product"><strong>We don’t have this product yet.</strong><p>No fake match was substituted. Add it from the package label and it will become a personal verified product for next time.</p><div><label className="button button-secondary file-button">{this.state.labelLoading?'Reading label…':'Scan nutrition label'}<input type="file" accept="image/*" capture="environment" onChange={(e:any)=>this.scanLabel(e.target.files?.[0])}/></label><button className="button button-quiet" onClick={()=>this.props.onManual({barcode:this.state.code})}>Enter manually</button></div></div>:null}</div>;}
+  render(){
+    const supported=barcodeScannerSupported();
+    const stillSupported=barcodeImageSupported();
+    const engine=barcodeScannerEngine();
+    return <div className="barcode-pane">
+      <div className={`scanner-shell ${this.state.scanning?'active':''}`}>
+        <video ref={this.videoRef} playsInline muted autoPlay/>
+        <div className="scanner-frame"><i/><i/><i/><i/></div>
+        {!this.state.scanning?<div className="scanner-placeholder"><span>▦</span><strong>{supported?'Scan a UPC/EAN barcode':'Use barcode photo or manual entry'}</strong><small>{supported?(engine==='zxing'?'iPhone compatibility scanner is ready. Keep the full barcode inside the frame.':'UPC-A, UPC-E, EAN-8 and EAN-13 are decoded on-device.'):'Safari does not expose the native BarcodeDetector API. The photo fallback works without Gemini.'}</small></div>:null}
+      </div>
+      <div className="barcode-actions">
+        {supported?<button className="button button-secondary" onClick={()=>this.state.scanning?this.stop():this.scan()}>{this.state.scanning?'Stop camera':'Start camera'}</button>:null}
+        {stillSupported?<label className="button button-quiet file-button">{this.state.imageLoading?'Reading photo…':'Take barcode photo'}<input type="file" accept="image/*" capture="environment" onChange={(e:any)=>this.scanBarcodePhoto(e.target.files?.[0])}/></label>:null}
+        <div className="barcode-manual"><input inputMode="numeric" autoComplete="off" placeholder="Enter barcode digits" value={this.state.code} onChange={(e:any)=>this.setState({code:e.target.value.replace(/\D/g,'')})} onKeyDown={(e:any)=>{if(e.key==='Enter')this.lookup();}}/><button className="button button-primary" onClick={()=>this.lookup()}>Look up</button></div>
+      </div>
+      {this.state.status?<div className="loading-line">{this.state.status}</div>:null}
+      {this.state.error?<div className="inline-error">{this.state.error}</div>:null}
+      <div className="callout subtle"><strong>No AI needed</strong><span>Barcode decoding and Open Food Facts lookup stay deterministic. If the live camera is awkward on iPhone, use “Take barcode photo.”</span></div>
+      {this.state.unknown?<div className="unknown-product"><strong>We don’t have this product yet.</strong><p>No fake match was substituted. Add it from the package label and it will become a personal verified product for next time.</p><div><label className="button button-secondary file-button">{this.state.labelLoading?'Reading label…':'Scan nutrition label'}<input type="file" accept="image/*" capture="environment" onChange={(e:any)=>this.scanLabel(e.target.files?.[0])}/></label><button className="button button-quiet" onClick={()=>this.props.onManual({barcode:this.state.code})}>Enter manually</button></div></div>:null}
+    </div>;
+  }
 }
 
 function RepeatPane({data,onCopied}:{data:AppData;onCopied:()=>void}):JSX.Element{

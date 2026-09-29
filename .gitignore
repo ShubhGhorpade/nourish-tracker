@@ -7,3 +7,5 @@ supabase/.temp/
 coverage/
 
 /browser-*.png
+
+node_modules/

@@ -60,11 +60,20 @@ export function MealCard({ meal, total, onCopy, onEditItem, onRemoveItem }: { me
   </section>;
 }
 
+
+class ModalErrorBoundary extends React.Component<{ children:any; onClose:()=>void },{ failed:boolean; message:string }>{
+  constructor(props:any){super(props);this.state={failed:false,message:''};}
+  componentDidCatch(error:any){this.setState({failed:true,message:error instanceof Error?error.message:'This panel could not be displayed.'});}
+  render(){
+    if(!this.state.failed)return this.props.children;
+    return <div className="modal-recovery" role="alert"><div className="modal-recovery-mark">!</div><h3>This panel hit a browser compatibility issue</h3><p>{this.state.message||'Close this panel and try the fallback workflow.'}</p><div className="button-row"><button className="button button-secondary" onClick={()=>this.setState({failed:false,message:''})}>Try again</button><button className="button button-quiet" onClick={this.props.onClose}>Close</button></div><small>Your local nutrition data was not deleted.</small></div>;
+  }
+}
 export function Modal({ title, subtitle, onClose, children, wide=false }: { title: string; subtitle?: string; onClose: () => void; children: any; wide?: boolean }): JSX.Element {
   return <div className="modal-backdrop" role="presentation" onMouseDown={(e:any) => { if (e.target === e.currentTarget) onClose(); }}>
     <section className={cx('modal', wide && 'modal-wide')} role="dialog" aria-modal="true" aria-label={title}>
       <header className="modal-header"><div><h2>{title}</h2>{subtitle ? <p>{subtitle}</p> : null}</div><IconButton label="Close" icon="×" onClick={onClose} /></header>
-      <div className="modal-body">{children}</div>
+      <div className="modal-body"><ModalErrorBoundary onClose={onClose}>{children}</ModalErrorBoundary></div>
     </section>
   </div>;
 }

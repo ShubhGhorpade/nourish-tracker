@@ -1,4 +1,4 @@
-const CACHE = 'nourish-shell-v2';
+const CACHE = 'nourish-shell-v4';
 const SHELL = [
   './','./index.html','./app.css','./config.js','./manifest.webmanifest','./icon.svg',
   './vendor/react.production.min.js','./vendor/react-dom.production.min.js',
@@ -19,11 +19,17 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  if (url.origin !== location.origin) return; // External food/API data stays network-controlled.
+  if (url.origin !== location.origin) return;
+  // Network-first prevents stale JS/CSS from leaving iPhone users on a blank screen after a deployment.
   event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
+    fetch(event.request).then(response => {
       if (response.ok) caches.open(CACHE).then(cache => cache.put(event.request, response.clone()));
       return response;
-    }).catch(() => caches.match('./index.html')))
+    }).catch(async () => {
+      const cached = await caches.match(event.request);
+      if (cached) return cached;
+      if (event.request.mode === 'navigate') return (await caches.match('./index.html')) || Response.error();
+      return Response.error();
+    })
   );
 });

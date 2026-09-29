@@ -15,16 +15,27 @@ function respond(req: Request, body: unknown, status = 200): Response { return n
 function cleanText(value: unknown, max = 4000): string { return typeof value === 'string' ? value.trim().slice(0,max) : ''; }
 function finiteOrNull(v: unknown): number | null { const n=Number(v); return Number.isFinite(n)&&n>=0?n:null; }
 
-async function requireUser(req: Request): Promise<{ id:string; email?:string }> {
+function publishableKey(): string | null {
+  const modern = Deno.env.get('SUPABASE_PUBLISHABLE_KEYS');
+  if (modern) {
+    try {
+      const parsed = JSON.parse(modern);
+      if (typeof parsed?.default === 'string' && parsed.default) return parsed.default;
+    } catch { /* fall back to legacy */ }
+  }
+  return Deno.env.get('SUPABASE_ANON_KEY') ?? null;
+}
+
+async function requireUser(req: Request): Promise<{ id:string; email?:string; isAnonymous?:boolean }> {
   const token = req.headers.get('authorization')?.replace(/^Bearer\s+/i,'');
   const url = Deno.env.get('SUPABASE_URL');
-  const anon = Deno.env.get('SUPABASE_ANON_KEY');
-  if (!token || !url || !anon) throw new Error('AUTH_REQUIRED');
-  const r = await fetch(`${url}/auth/v1/user`, { headers: { authorization:`Bearer ${token}`, apikey:anon } });
+  const key = publishableKey();
+  if (!token || !url || !key) throw new Error('AUTH_REQUIRED');
+  const r = await fetch(`${url}/auth/v1/user`, { headers: { authorization:`Bearer ${token}`, apikey:key } });
   if (!r.ok) throw new Error('AUTH_REQUIRED');
   const user = await r.json();
   if (!user?.id) throw new Error('AUTH_REQUIRED');
-  return { id:user.id, email:user.email };
+  return { id:user.id, email:user.email, isAnonymous:Boolean(user.is_anonymous) };
 }
 
 const confidenceEnum = { type:'string', enum:['high','medium','low'] };
